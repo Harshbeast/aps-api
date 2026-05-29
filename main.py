@@ -22,7 +22,7 @@ async def run_aps(data: dict):
         material_df = pd.DataFrame(
             data.get("materials", [])
         )
-        materials_df = materials_df.rename(columns={
+        material_df = material_df.rename(columns={
                 "Title": "Material",
                 "field_1": "zen10",
                 "field_2": "zen30",
