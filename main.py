@@ -157,6 +157,7 @@ async def run_aps(data: dict):
                 "status": "success",
                 "type": "no_changes",
                 "schedule": schedule_output.to_dict(orient="records")
+                "backup": backup_output.to_dict(orient="records")
             }
 
         # ====================================
@@ -215,6 +216,7 @@ async def run_aps(data: dict):
                 "status": "success",
                 "type": "replanned",
                 "schedule": schedule_output.to_dict(orient="records")
+                "backup": backup_output.to_dict(orient="records")
             }
 
         # No changes
