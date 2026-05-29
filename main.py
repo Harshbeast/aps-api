@@ -2,6 +2,8 @@ from fastapi import FastAPI
 
 import pandas as pd
 
+import numpy as np
+
 from creater import create_schedule
 
 from scheduler import run_scheduler
@@ -108,6 +110,21 @@ async def run_aps(data: dict):
             "zen70": "field_4",
             "zen90": "field_5"
         }
+
+        # ====================================
+        # CLEAN JSON DATA
+        # ====================================
+        
+        def clean_dataframe(df):
+        
+            df = df.replace(
+                [np.inf, -np.inf],
+                0
+                )
+        
+            df = df.fillna(0)
+        
+            return df
 
         # ====================================
         # VALIDATION
