@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from httpcore import request
 import pandas as pd
 
 from creater import create_schedule
@@ -19,9 +20,8 @@ async def run_aps(data: dict):
         # RECEIVE DATA
         # ====================================
 
-        material_df = pd.DataFrame(
-            data.get("materials", [])
-        )
+        material_df = pd.DataFrame(request.materials)
+        
         material_df = material_df.rename(columns={
                 "Title": "Material",
                 "field_1": "zen10",
@@ -49,16 +49,6 @@ async def run_aps(data: dict):
             data.get("actuals", [])
         )
 
-        actual_df = actual_df.rename(columns={
-                "Title": "Date",
-                "field_1": "zen10",
-                "field_2": "zen30",
-                "field_3": "zen50",
-                "field_4": "zen70",
-                "field_5": "zen90",
-                "field_6":"Total"
-            })
-
         plan_df = pd.DataFrame(
             data.get("plan", [])
         )
@@ -70,7 +60,7 @@ async def run_aps(data: dict):
                 "field_3": "zen50",
                 "field_4": "zen70",
                 "field_5": "zen90",
-                "field_6":"Total"
+                "field_6": "Total"
             })
 
         backup_df = pd.DataFrame(
@@ -90,6 +80,33 @@ async def run_aps(data: dict):
                 "field_8": "Incoming_Qty",
                 "field_9": "Date"
             })
+        
+
+        # ====================================
+        # REVERSE COLUMN MAPPING
+        # ====================================
+
+        reverse_material_columns = {
+            "Material": "Title",
+            "zen10": "field_1",
+            "zen30": "field_2",
+            "zen50": "field_3",
+            "zen70": "field_4",
+            "zen90": "field_5",
+            "Available_Qty": "field_6",
+            "required_Qty": "field_7",
+            "Incoming_Qty": "field_8",
+            "Date": "field_9"
+        }
+
+        reverse_schedule_columns = {
+            "Date": "Title",
+            "zen10": "field_1",
+            "zen30": "field_2",
+            "zen50": "field_3",
+            "zen70": "field_4",
+            "zen90": "field_5"
+        }
 
         # ====================================
         # VALIDATION
@@ -136,20 +153,30 @@ async def run_aps(data: dict):
                 start_date=start_date
             )
 
+            schedule_output = output_df.rename(
+            columns=reverse_schedule_columns
+            )
+
+            backup_output = material_df.rename(
+                columns=reverse_material_columns
+            )
+
             return {
 
                 "status": "success",
 
                 "type": "initial",
 
-                "schedule": output_df.to_dict(
+                "schedule": schedule_output.to_dict(
                     orient="records"
                 ),
 
-                "backup": material_df.to_dict(
+                "backup": backup_output.to_dict(
                     orient="records"
                 )
             }
+
+            
 
         # ====================================
         # CHECK DEVIATION
@@ -219,20 +246,43 @@ async def run_aps(data: dict):
                 replan_date=today_str
             )
 
+            schedule_output = replanned_df.rename(
+            columns=reverse_schedule_columns
+            )
+
+            backup_output = material_df.rename(
+                columns=reverse_material_columns
+            )
+
             return {
 
                 "status": "success",
 
                 "type": "replanned",
 
-                "schedule": replanned_df.to_dict(
+                "schedule": schedule_output.to_dict(
                     orient="records"
                 ),
 
-                "backup": material_df.to_dict(
+                "backup": backup_output.to_dict(
                     orient="records"
                 )
             }
+
+            # return {
+
+            #     "status": "success",
+
+            #     "type": "replanned",
+
+            #     "schedule": replanned_df.to_dict(
+            #         orient="records"
+            #     ),
+
+            #     "backup": material_df.to_dict(
+            #         orient="records"
+            #     )
+            # }
 
         return {
 
