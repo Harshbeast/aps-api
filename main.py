@@ -22,10 +22,28 @@ async def run_aps(data: dict):
         material_df = pd.DataFrame(
             data.get("materials", [])
         )
+        materials_df = materials_df.rename(columns={
+                "Title": "Material",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Available_Qty",
+                "field_7": "required_Qty",
+                "Date": "Date",
+                "Incoming_Oty": "Incoming_Qty"
+            })
 
         targets_df = pd.DataFrame(
             data.get("targets", [])
         )
+
+        targets_df = targets_df.rename(columns={
+                "Title": "Product",
+                "field_1": "Target_Qty",
+                "field_2": "Priority"
+            })
 
         actual_df = pd.DataFrame(
             data.get("actuals", [])
@@ -38,6 +56,20 @@ async def run_aps(data: dict):
         backup_df = pd.DataFrame(
             data.get("backup", [])
         )
+
+
+        materials_df = materials_df.rename(columns={
+                "Title": "Material",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Available_Qty",
+                "field_7": "required_Qty",
+                "field_8": "Incoming_Qty",
+                "field_9": "Date"
+            })
 
         # ====================================
         # VALIDATION
