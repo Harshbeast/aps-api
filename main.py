@@ -52,6 +52,16 @@ async def run_aps(data: dict):
             data.get("actuals", [])
         )
 
+        actual_df = actual_df.rename(columns={
+                "Title": "Date",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Total"
+            })
+
         plan_df = pd.DataFrame(
             data.get("plan", [])
         )
@@ -172,27 +182,33 @@ async def run_aps(data: dict):
             )
 
             schedule_output = output_df.rename(
-            columns=reverse_schedule_columns
-            )
-
+                    columns=reverse_schedule_columns
+                )
+                
             backup_output = material_df.rename(
-                columns=reverse_material_columns
-            )
+                    columns=reverse_material_columns
+                )
+                
+            schedule_output = clean_dataframe(
+                    schedule_output
+                )
+                
+            backup_output = clean_dataframe(
+                    backup_output
+                )
+
+            plan_df = clean_dataframe(plan_df)
 
             return {
-
+            
                 "status": "success",
-
-                "type": "initial",
-
-                "schedule": schedule_output.to_dict(
-                    orient="records"
-                ),
-
-                "backup": backup_output.to_dict(
+            
+                "type": "no_changes",
+            
+                "schedule": plan_df.to_dict(
                     orient="records"
                 )
-            }
+                }
 
             
 
@@ -265,11 +281,19 @@ async def run_aps(data: dict):
             )
 
             schedule_output = replanned_df.rename(
-            columns=reverse_schedule_columns
+                columns=reverse_schedule_columns
             )
-
+            
             backup_output = material_df.rename(
                 columns=reverse_material_columns
+            )
+            
+            schedule_output = clean_dataframe(
+                schedule_output
+            )
+            
+            backup_output = clean_dataframe(
+                backup_output
             )
 
             return {
