@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 
-from httpcore import request
 import pandas as pd
 
 from creater import create_schedule
@@ -20,7 +19,9 @@ async def run_aps(data: dict):
         # RECEIVE DATA
         # ====================================
 
-        material_df = pd.DataFrame(request.materials)
+        material_df = pd.DataFrame(
+            data.get("materials", [])
+                    )
         
         material_df = material_df.rename(columns={
                 "Title": "Material",
