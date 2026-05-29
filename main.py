@@ -49,6 +49,16 @@ async def run_aps(data: dict):
             data.get("actuals", [])
         )
 
+        actual_df = actual_df.rename(columns={
+                "Title": "Date",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6":"Total"
+            })
+
         plan_df = pd.DataFrame(
             data.get("plan", [])
         )
@@ -59,7 +69,8 @@ async def run_aps(data: dict):
                 "field_2": "zen30",
                 "field_3": "zen50",
                 "field_4": "zen70",
-                "field_5": "zen90"
+                "field_5": "zen90",
+                "field_6":"Total"
             })
 
         backup_df = pd.DataFrame(
