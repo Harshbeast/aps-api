@@ -31,8 +31,8 @@ async def run_aps(data: dict):
                 "field_5": "zen90",
                 "field_6": "Available_Qty",
                 "field_7": "required_Qty",
-                "Date": "Date",
-                "Incoming_Oty": "Incoming_Qty"
+                "field_8": "Incoming_Qty",
+                "field_9": "Date"
             })
 
         targets_df = pd.DataFrame(
