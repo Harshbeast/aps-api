@@ -1,28 +1,21 @@
 from fastapi import FastAPI
 
 import pandas as pd
+
 import numpy as np
 
 from creater import create_schedule
+
 from scheduler import run_scheduler
 
 from datetime import datetime
 
 app = FastAPI()
 
-
 @app.post("/run_aps")
-async def run_aps(data):
+async def run_aps(data: dict):
 
     try:
-
-        # ====================================
-        # HANDLE LIST INPUT
-        # ====================================
-
-        if isinstance(data, list):
-
-            data = data[0]
 
         # ====================================
         # RECEIVE DATA
@@ -30,65 +23,77 @@ async def run_aps(data):
 
         material_df = pd.DataFrame(
             data.get("materials", [])
-        )
-
+                    )
+        
         material_df = material_df.rename(columns={
-            "Title": "Material",
-            "field_1": "zen10",
-            "field_2": "zen30",
-            "field_3": "zen50",
-            "field_4": "zen70",
-            "field_5": "zen90",
-            "field_6": "Available_Qty",
-            "field_7": "required_Qty",
-            "field_8": "Incoming_Qty",
-            "field_9": "Date"
-        })
+                "Title": "Material",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Available_Qty",
+                "field_7": "required_Qty",
+                "field_8": "Incoming_Qty",
+                "field_9": "Date"
+            })
 
         targets_df = pd.DataFrame(
             data.get("targets", [])
         )
 
         targets_df = targets_df.rename(columns={
-            "Title": "Product",
-            "field_1": "Target_Qty",
-            "field_2": "Priority"
-        })
+                "Title": "Product",
+                "field_1": "Target_Qty",
+                "field_2": "Priority"
+            })
 
         actual_df = pd.DataFrame(
-            data.get("actuals", [])
-        )
+        data.get("actuals", {}).get("value", [])
+            )
+
+        actual_df = actual_df.rename(columns={
+                "Title": "Date",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Total"
+            })
 
         plan_df = pd.DataFrame(
-            data.get("plan", [])
+        data.get("plan", {}).get("value", [])
         )
 
         plan_df = plan_df.rename(columns={
-            "Title": "Date",
-            "field_1": "zen10",
-            "field_2": "zen30",
-            "field_3": "zen50",
-            "field_4": "zen70",
-            "field_5": "zen90",
-            "field_6": "Total"
-        })
+                "Title": "Date",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Total"
+            })
 
         backup_df = pd.DataFrame(
             data.get("backup", [])
         )
 
+
         backup_df = backup_df.rename(columns={
-            "Title": "Material",
-            "field_1": "zen10",
-            "field_2": "zen30",
-            "field_3": "zen50",
-            "field_4": "zen70",
-            "field_5": "zen90",
-            "field_6": "Available_Qty",
-            "field_7": "required_Qty",
-            "field_8": "Incoming_Qty",
-            "field_9": "Date"
-        })
+                "Title": "Material",
+                "field_1": "zen10",
+                "field_2": "zen30",
+                "field_3": "zen50",
+                "field_4": "zen70",
+                "field_5": "zen90",
+                "field_6": "Available_Qty",
+                "field_7": "required_Qty",
+                "field_8": "Incoming_Qty",
+                "field_9": "Date"
+            })
+        
 
         # ====================================
         # REVERSE COLUMN MAPPING
@@ -113,23 +118,22 @@ async def run_aps(data):
             "zen30": "field_2",
             "zen50": "field_3",
             "zen70": "field_4",
-            "zen90": "field_5",
-            "Total": "field_6"
+            "zen90": "field_5"
         }
 
         # ====================================
         # CLEAN JSON DATA
         # ====================================
-
+        
         def clean_dataframe(df):
-
+        
             df = df.replace(
                 [np.inf, -np.inf],
                 0
-            )
-
+                )
+        
             df = df.fillna(0)
-
+        
             return df
 
         # ====================================
@@ -177,35 +181,36 @@ async def run_aps(data):
                 start_date=start_date
             )
 
-            # CLEAN DATA
-
-            output_df = clean_dataframe(output_df)
-            material_df = clean_dataframe(material_df)
-
-            # CONVERT BACK TO SHAREPOINT FORMAT
-
             schedule_output = output_df.rename(
-                columns=reverse_schedule_columns
-            )
-
+                    columns=reverse_schedule_columns
+                )
+                
             backup_output = material_df.rename(
-                columns=reverse_material_columns
-            )
+                    columns=reverse_material_columns
+                )
+                
+            schedule_output = clean_dataframe(
+                    schedule_output
+                )
+                
+            backup_output = clean_dataframe(
+                    backup_output
+                )
+
+            plan_df = clean_dataframe(plan_df)
 
             return {
-
+            
                 "status": "success",
-
-                "type": "initial",
-
-                "schedule": schedule_output.to_dict(
-                    orient="records"
-                ),
-
-                "backup": backup_output.to_dict(
+            
+                "type": "no_changes",
+            
+                "schedule": plan_df.to_dict(
                     orient="records"
                 )
-            }
+                }
+
+            
 
         # ====================================
         # CHECK DEVIATION
@@ -220,7 +225,8 @@ async def run_aps(data):
                 actual_date = actual_row["Date"]
 
                 plan_row = plan_df[
-                    plan_df["Date"] == actual_date
+                    plan_df["Date"]
+                    == actual_date
                 ]
 
                 if plan_row.empty:
@@ -233,11 +239,11 @@ async def run_aps(data):
                 for p in targets_df["Product"]:
 
                     actual_qty = int(
-                        actual_row.get(p, 0)
+                        actual_row[p]
                     )
 
                     planned_qty = int(
-                        plan_row.get(p, 0)
+                        plan_row[p]
                     )
 
                     if actual_qty != planned_qty:
@@ -274,19 +280,20 @@ async def run_aps(data):
                 replan_date=today_str
             )
 
-            # CLEAN DATA
-
-            replanned_df = clean_dataframe(replanned_df)
-            material_df = clean_dataframe(material_df)
-
-            # CONVERT BACK TO SHAREPOINT FORMAT
-
             schedule_output = replanned_df.rename(
                 columns=reverse_schedule_columns
             )
-
+            
             backup_output = material_df.rename(
                 columns=reverse_material_columns
+            )
+            
+            schedule_output = clean_dataframe(
+                schedule_output
+            )
+            
+            backup_output = clean_dataframe(
+                backup_output
             )
 
             return {
@@ -304,15 +311,20 @@ async def run_aps(data):
                 )
             }
 
-        # ====================================
-        # NO CHANGES
-        # ====================================
+            # return {
 
-        plan_df = clean_dataframe(plan_df)
+            #     "status": "success",
 
-        schedule_output = plan_df.rename(
-            columns=reverse_schedule_columns
-        )
+            #     "type": "replanned",
+
+            #     "schedule": replanned_df.to_dict(
+            #         orient="records"
+            #     ),
+
+            #     "backup": material_df.to_dict(
+            #         orient="records"
+            #     )
+            # }
 
         return {
 
@@ -320,7 +332,7 @@ async def run_aps(data):
 
             "type": "no_changes",
 
-            "schedule": schedule_output.to_dict(
+            "schedule": plan_df.to_dict(
                 orient="records"
             )
         }
