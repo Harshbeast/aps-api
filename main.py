@@ -49,8 +49,8 @@ async def run_aps(data: dict):
             })
 
         actual_df = pd.DataFrame(
-            data.get("actuals", [])
-        )
+        data.get("actuals", {}).get("value", [])
+            )
 
         actual_df = actual_df.rename(columns={
                 "Title": "Date",
@@ -63,7 +63,7 @@ async def run_aps(data: dict):
             })
 
         plan_df = pd.DataFrame(
-            data.get("plan", [])
+        data.get("plan", {}).get("value", [])
         )
 
         plan_df = plan_df.rename(columns={
