@@ -118,8 +118,8 @@ async def run_aps(data: dict):
         def clean_dataframe(df):
             if df.empty:
                 return df
-            df = df.replace([np.inf, -np.inf], 0)
-            df = df.fillna(0)
+            df = df.replace([np.inf, -np.inf], '0')
+            df = df.fillna('0')
             return df
 
         # ====================================
