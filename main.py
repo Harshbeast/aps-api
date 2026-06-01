@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from creater import create_schedule
 from scheduler import run_scheduler
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback
 
 app = FastAPI()
@@ -136,6 +136,8 @@ async def run_aps(data: dict):
         # ====================================
         start_date = datetime.today().replace(day=1).strftime("%d-%m-%y")
         today_str = datetime.today().strftime("%d-%m-%y")
+        tomorrow_str = (datetime.today() + timedelta(days=1)).strftime("%d-%m-%y")
+
 
         # ====================================
         # INITIAL PLAN (No previous plan)
@@ -203,7 +205,7 @@ async def run_aps(data: dict):
                 actual_df=actual_df,
                 previous_plan_df=plan_df,
                 start_date=start_date,
-                replan_date=today_str
+                replan_date=tomorrow_str
             )
 
             schedule_output = replanned_df.rename(columns=reverse_schedule_columns)
