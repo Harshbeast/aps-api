@@ -104,12 +104,7 @@ async def run_aps(data: dict):
         }
 
         reverse_schedule_columns = {
-            "Date": "Title",
-            "zen10": "field_1",
-            "zen30": "field_2",
-            "zen50": "field_3",
-            "zen70": "field_4",
-            "zen90": "field_5"
+            "Date": "Title","zen10": "field_1","zen30": "field_2","zen50": "field_3","zen70": "field_4","zen90": "field_5"
         }
 
         # ====================================
