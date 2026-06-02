@@ -1,1008 +1,264 @@
+
 # ============================================
 # scheduler.py
-# INDUSTRIAL APS REPLANNING ENGINE
 # ============================================
 
 import pandas as pd
-
 from ortools.sat.python import cp_model
-
 from datetime import datetime, timedelta
-
 
 # ============================================
 # CONFIGURATION
 # ============================================
 
 MAX_SYSTEMS_PER_DAY = 6
-
-
-
 MAX_PRODUCTS_PER_DAY = 6
-
 DIVERSITY_WEIGHT = 2
-
 SMOOTHNESS_WEIGHT = 1
-
 STABILITY_WEIGHT = 1
 
 product_max = {
-
-    "zen10": 2,
-    "zen30": 1,
-    "zen50": 2,
-    "zen70": 2,
-    "zen90": 1
-
+    "zen10": 2, "zen30": 1, "zen50": 2, "zen70": 2, "zen90": 1
 }
 
 
-# ============================================
-# GENERATE WORKING DATES
-# INCLUDE EXTRA WORKING DAYS
-# ============================================
+def generate_working_dates(start_date, actual_df=None, previous_plan_df=None):
+    start_date_obj = datetime.strptime(start_date, "%d-%m-%y")
+    first_day_of_month = start_date_obj.replace(day=1)
 
-# ============================================
-# GENERATE APS CALENDAR
-# ============================================
-
-def generate_working_dates(
-
-    start_date,
-
-    actual_df=None,
-
-    previous_plan_df=None
-):
-
-    start_date_obj = datetime.strptime(
-        start_date,
-        "%d-%m-%y"
-    )
-
-    first_of_month = start_date_obj.replace(
-        day=1
-    )
-
-    # ========================================
-    # FIND LAST DAY OF MONTH
-    # ========================================
-
-    if first_of_month.month == 12:
-
-        next_month = first_of_month.replace(
-
-            year=first_of_month.year + 1,
-
-            month=1,
-
-            day=1
-        )
-
+    # Planning Period: 28th Prev Month → 27th Current Month
+    if first_day_of_month.month == 1:
+        planning_start = first_day_of_month.replace(year=first_day_of_month.year - 1, month=12, day=28)
     else:
+        planning_start = first_day_of_month.replace(month=first_day_of_month.month - 1, day=28)
 
-        next_month = first_of_month.replace(
-
-            month=first_of_month.month + 1,
-
-            day=1
-        )
-
-    last_of_month = next_month - timedelta(
-        days=1
-    )
-
-    # ========================================
-    # NORMAL WEEKDAYS
-    # ========================================
+    planning_end = first_day_of_month.replace(day=27)
 
     working_dates = []
+    current = planning_start
+    while current <= planning_end:
+        if current.weekday() < 5:
+            working_dates.append(current.strftime("%d-%m-%y"))
+        current += timedelta(days=1)
 
-    current_date = first_of_month
+    # Add dates from actual and previous plan
+    extra = set()
+    if actual_df is not None and not actual_df.empty:
+        extra.update(actual_df["Date"].astype(str).tolist())
+    if previous_plan_df is not None and not previous_plan_df.empty:
+        extra.update(previous_plan_df["Date"].astype(str).tolist())
 
-    while current_date <= last_of_month:
+    working_dates.extend([d for d in extra if d not in working_dates])
 
-        if current_date.weekday() < 5:
-
-            working_dates.append(
-
-                current_date.strftime(
-                    "%d-%m-%y"
-                )
-            )
-
-        current_date += timedelta(days=1)
-
-    # ========================================
-    # ADD EXTRA ACTUAL DATES
-    # ========================================
-
-    if (
-        actual_df is not None
-        and
-        not actual_df.empty
-    ):
-
-        for d in actual_df["Date"]:
-
-            if d not in working_dates:
-
-                working_dates.append(d)
-
-    # ========================================
-    # ADD EXTRA PLAN DATES
-    # ========================================
-
-    if (
-        previous_plan_df is not None
-        and
-        not previous_plan_df.empty
-    ):
-
-        for d in previous_plan_df["Date"]:
-
-            if d not in working_dates:
-
-                working_dates.append(d)
-
-    # ========================================
-    # SORT
-    # ========================================
-
-    working_dates = sorted(
-
-        list(set(working_dates)),
-
-        key=lambda x: datetime.strptime(
-            x,
-            "%d-%m-%y"
-        )
-    )
-
+    # Sort chronologically
+    working_dates = sorted(list(set(working_dates)), 
+                          key=lambda x: datetime.strptime(x, "%d-%m-%y"))
     return working_dates
 
-# ============================================
-# EMPTY CHECK
-# ============================================
 
 def is_empty(df):
-
-    if df is None:
-        return True
-
-    if len(df) == 0:
-        return True
-
-    return False
+    return df is None or df.empty
 
 
-# ============================================
-# MAIN APS FUNCTION
-# ============================================
+def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_date, replan_date):
+    products = targets_df["Product"].tolist()
 
-def run_scheduler(
+    working_dates = generate_working_dates(start_date, actual_df, previous_plan_df)
 
-    material_df,
-
-    targets_df,
-
-    actual_df,
-
-    previous_plan_df,
-
-    start_date,
-
-    replan_date
-
-):
-
-    # ========================================
-    # PRODUCTS
-    # ========================================
-
-    products = targets_df[
-        "Product"
-    ].tolist()
-
-    # ========================================
-    # WORKING DATES
-    # ========================================
-
-    working_dates = generate_working_dates(
-
-        start_date,
-
-        actual_df,
-
-        previous_plan_df
-
-    )
-
-    # ========================================
-    # PAST + FUTURE DATES
-    # ========================================
-
+    # === CRITICAL FIX: Strict Past / Future Split ===
+    replan_dt = datetime.strptime(replan_date, "%d-%m-%y")
+    
     past_dates = []
-
     future_dates = []
-
     for d in working_dates:
-        datetime.strptime(d, "%d-%m-%y")
-
-        if d < replan_date:
-
+        d_dt = datetime.strptime(d, "%d-%m-%y")
+        if d_dt < replan_dt:
             past_dates.append(d)
-
         else:
-
             future_dates.append(d)
 
-    # ========================================
-    # TARGETS
-    # ========================================
+    # Targets & Priorities
+    targets = {row["Product"]: int(row["Target_Qty"]) for _, row in targets_df.iterrows()}
+    priorities = {row["Product"]: int(row["Priority"]) for _, row in targets_df.iterrows()}
 
-    targets = {}
+    # Materials
+    materials = material_df["Material"].tolist()
+    material_stock = {row["Material"]: int(row["Available_Qty"]) for _, row in material_df.iterrows()}
+    material_usage = {row["Material"]: {p: int(row[p]) for p in products} 
+                      for _, row in material_df.iterrows()}
 
-    for _, row in targets_df.iterrows():
-
-        targets[row["Product"]] = int(
-            row["Target_Qty"]
-        )
-
-
-    # ========================================
-# PRIORITIES
-# ========================================
-
-    
-
-    priorities = {}
-
-    for _, row in targets_df.iterrows():
-
-        priorities[row["Product"]] = int(
-            row["Priority"]
-        )
-
-    # ========================================
-    # MATERIALS
-    # ========================================
-
-    materials = material_df[
-        "Material"
-    ].tolist()
-
-    material_usage = {}
-
-    material_stock = {}
-
-    for _, row in material_df.iterrows():
-
-        material = row["Material"]
-
-        material_stock[material] = int(
-            row["Available_Qty"]
-        )
-
-        material_usage[material] = {}
-
-        for p in products:
-
-            material_usage[material][p] = int(
-                row[p]
-            )
-
-    # ========================================
-    # ACTUAL PRODUCTION
-    # ========================================
-
+    # Actual Production Dictionary
     actual_dict = {}
-
     if not is_empty(actual_df):
-
         for _, row in actual_df.iterrows():
+            date = str(row["Date"])
+            actual_dict[date] = {p: int(row[p]) for p in products}
 
-            date = row["Date"]
-
-            actual_dict[date] = {}
-
-            for p in products:
-
-                actual_dict[date][p] = int(
-                    row[p]
-                )
-
-    # ========================================
-    # PREVIOUS PLAN
-    # ========================================
-
+    # Previous Plan
     previous_plan = {}
-
     if not is_empty(previous_plan_df):
-
         for _, row in previous_plan_df.iterrows():
+            date = str(row["Date"])
+            previous_plan[date] = {p: int(row[p]) for p in products}
 
-            date = row["Date"]
-
-            previous_plan[date] = {}
-
-            for p in products:
-
-                previous_plan[date][p] = int(
-                    row[p]
-                )
-
-    # ========================================
-# ARRIVALS DICTIONARY
-# ========================================
-
+    # Arrivals
     arrivals = {}
-
     for _, row in material_df.iterrows():
-
-        incoming_qty = row["Incoming_Qty"]
-
-        arrival_date = row["Date"]
-
-        # SKIP EMPTY ARRIVALS
-        if pd.isna(incoming_qty) or pd.isna(arrival_date):
+        if pd.isna(row.get("Incoming_Qty")) or pd.isna(row.get("Date")):
             continue
+        day = str(row["Date"])
+        mat = row["Material"]
+        qty = int(row["Incoming_Qty"])
+        arrivals.setdefault(day, {})[mat] = arrivals.get(day, {}).get(mat, 0) + qty
 
-        qty = int(incoming_qty)
-
-        day = str(arrival_date)
-
-        material = row["Material"]
-
-        if day not in arrivals:
-
-            arrivals[day] = {}
-
-        arrivals[day][material] = (
-
-            arrivals[day].get(material, 0)
-
-            + qty
-        )
-
-    # ========================================
-    # APPLY ACTUAL CONSUMPTION
-    # ========================================
-
+    # Apply Actual Consumption (Past)
     for d in past_dates:
+        if d in actual_dict:
+            for p in products:
+                qty = actual_dict[d][p]
+                for mat in materials:
+                    material_stock[mat] -= qty * material_usage[mat][p]
 
-        if d not in actual_dict:
-            continue
+    # Apply Past Arrivals
+    for day in list(arrivals.keys()):
+        if datetime.strptime(day, "%d-%m-%y") < replan_dt:
+            for mat in arrivals[day]:
+                material_stock[mat] += arrivals[day][mat]
 
-        for p in products:
-
-            qty = actual_dict[d][p]
-
-            for material in materials:
-
-                usage = material_usage[
-                    material
-                ][p]
-
-                material_stock[material] -= (
-
-                    qty * usage
-
-                )
-
-    # ========================================
-    # APPLY PAST ARRIVALS
-    # ========================================
-
-    for arrival_date in arrivals:
-
-        if arrival_date >= replan_date:
-            continue
-
-        for material in arrivals[arrival_date]:
-
-            material_stock[material] += (
-
-                arrivals[arrival_date][material]
-
-            )
-
-    # ========================================
-    # REMAINING TARGETS
-    # ========================================
-
+    # Remaining Targets
     remaining_targets = {}
-
     for p in products:
+        done = sum(actual_dict.get(d, {}).get(p, 0) for d in past_dates)
+        remaining_targets[p] = max(0, targets[p] - done)
 
-        actual_done = 0
-
-        for d in past_dates:
-
-            if d in actual_dict:
-
-                actual_done += (
-                    actual_dict[d][p]
-                )
-
-        remaining_targets[p] = max(
-
-            0,
-
-            targets[p] - actual_done
-
-        )
-
-    # ========================================
-    # MATERIAL AVAILABILITY
-    # ========================================
-
+    # Material Availability for Future Dates
     material_available = {}
-
-    for material in materials:
-
-        material_available[material] = {}
-
-        cumulative = material_stock[
-            material
-        ]
-
+    for mat in materials:
+        material_available[mat] = {}
+        cum = material_stock[mat]
         for d in future_dates:
-
-            if (
-
-                d in arrivals
-
-                and material in arrivals[d]
-
-            ):
-
-                cumulative += (
-                    arrivals[d][material]
-                )
-
-            material_available[
-                material
-            ][d] = cumulative
+            if d in arrivals and mat in arrivals[d]:
+                cum += arrivals[d][mat]
+            material_available[mat][d] = cum
 
     # ========================================
-    # CREATE MODEL
+    # CP MODEL
     # ========================================
-
     model = cp_model.CpModel()
 
-    # ========================================
-    # VARIABLES
-    # ========================================
-
-    x = {}
-
-    for p in products:
-
-        for d in future_dates:
-
-            x[p, d] = model.NewIntVar(
-
-                        0,
-
-                        product_max[p],
-
-                        f"x_{p}_{d}"
-                        )
-
-    # ========================================
-    # BINARY VARIABLES
-    # ========================================
-
-    y = {}
+    x = {(p, d): model.NewIntVar(0, product_max[p], f"x_{p}_{d}") 
+         for p in products for d in future_dates}
+    y = {(p, d): model.NewBoolVar(f"y_{p}_{d}") 
+         for p in products for d in future_dates}
 
     for p in products:
-
         for d in future_dates:
+            model.Add(x[p, d] <= product_max[p] * y[p, d])
+            model.Add(x[p, d] >= y[p, d])
 
-            y[p, d] = model.NewBoolVar(
-                f"y_{p}_{d}"
-            )
-
-    # ========================================
-    # LINK x AND y
-    # ========================================
-
-    for p in products:
-
-        for d in future_dates:
-
-            model.Add(
-
-                x[p, d]
-
-                <= product_max[p] * y[p, d]
-            )
-
-            model.Add(
-
-                x[p, d]
-
-                >= y[p, d]
-
-            )
-
-    # ========================================
-    # STABILITY
-    # ========================================
-
+    # Stability
     schedule_changes = []
-
     if not is_empty(previous_plan_df):
-
         for p in products:
-
             for d in future_dates:
+                if d in previous_plan:
+                    old = previous_plan[d][p]
+                    change = model.NewIntVar(0, product_max[p], f"ch_{p}_{d}")
+                    model.AddAbsEquality(change, x[p, d] - old)
+                    schedule_changes.append(change)
 
-                if d not in previous_plan:
-                    continue
-
-                old_qty = previous_plan[d][p]
-
-                change = model.NewIntVar(
-
-                        0,
-
-                        product_max[p],
-
-                        f"change_{p}_{d}"
-
-                        )
-
-                model.AddAbsEquality(
-
-                    change,
-
-                    x[p, d] - old_qty
-
-                )
-
-                schedule_changes.append(
-                    change
-                )
-
-    # ========================================
-    # TARGET CONSTRAINTS
-    # ========================================
-
+    # Targets
     for p in products:
+        model.Add(sum(x[p, d] for d in future_dates) <= remaining_targets[p])
 
-        model.Add(
-
-            sum(
-
-                x[p, d]
-
-                for d in future_dates
-
-            )
-
-            <= remaining_targets[p]
-
-        )
-
-    # ========================================
-    # DAILY CAPACITY
-    # ========================================
-
+    # Daily Constraints
     for d in future_dates:
+        model.Add(sum(x[p, d] for p in products) <= MAX_SYSTEMS_PER_DAY)
+        model.Add(sum(y[p, d] for p in products) <= MAX_PRODUCTS_PER_DAY)
 
-        model.Add(
-
-            sum(
-
-                x[p, d]
-
-                for p in products
-
-            )
-
-            <= MAX_SYSTEMS_PER_DAY
-
-        )
-
-    # ========================================
-    # PRODUCT DIVERSITY
-    # ========================================
-
-    for d in future_dates:
-
-        model.Add(
-
-            sum(
-
-                y[p, d]
-
-                for p in products
-
-            )
-
-            <= MAX_PRODUCTS_PER_DAY
-
-        )
-
-    # ========================================
-    # PRODUCT SMOOTHING
-    # ========================================
-
+    # Smoothing
     for p in products:
+        for i in range(1, len(future_dates)):
+            d1, d2 = future_dates[i-1], future_dates[i]
+            model.Add(x[p, d2] - x[p, d1] <= 1)
+            model.Add(x[p, d1] - x[p, d2] <= 1)
 
-        for i in range(
-            1,
-            len(future_dates)
-        ):
+    # Material Constraints
+    for mat in materials:
+        for i, day in enumerate(future_dates):
+            consumption = [
+                x[prod, d] * material_usage[mat][prod]
+                for prod in products if material_usage[mat][prod] > 0
+                for d in future_dates[:i+1]
+            ]
+            model.Add(sum(consumption) <= material_available[mat][day])
 
-            d1 = future_dates[i - 1]
-
-            d2 = future_dates[i]
-
-            model.Add(
-
-                x[p, d2]
-                - x[p, d1]
-
-                <= 1
-
-            )
-
-            model.Add(
-
-                x[p, d1]
-                - x[p, d2]
-
-                <= 1
-
-            )
-
-    # ========================================
-    # MATERIAL CONSTRAINTS
-    # ========================================
-
-    for material in materials:
-
-        for i, current_day in enumerate(
-            future_dates
-        ):
-
-            consumption_terms = []
-
-            for p in products:
-
-                usage = material_usage[
-                    material
-                ][p]
-
-                if usage > 0:
-
-                    for d in future_dates[
-                        :i + 1
-                    ]:
-
-                        consumption_terms.append(
-
-                            x[p, d] * usage
-
-                        )
-
-            model.Add(
-
-                sum(consumption_terms)
-
-                <= material_available[
-                    material
-                ][current_day]
-
-            )
-
-    # ========================================
-    # DAILY LOAD
-    # ========================================
-
-    daily_load = {}
-
+    # Load & Smoothness
+    daily_load = {d: model.NewIntVar(0, MAX_SYSTEMS_PER_DAY, f"load_{d}") for d in future_dates}
     for d in future_dates:
-
-        daily_load[d] = model.NewIntVar(
-
-            0,
-
-            MAX_SYSTEMS_PER_DAY,
-
-            f"load_{d}"
-
-        )
-
-        model.Add(
-
-            daily_load[d]
-
-            == sum(
-
-                x[p, d]
-
-                for p in products
-
-            )
-
-        )
-
-    # ========================================
-    # LOAD SMOOTHNESS
-    # ========================================
+        model.Add(daily_load[d] == sum(x[p, d] for p in products))
 
     diffs = []
-
-    for i in range(
-        1,
-        len(future_dates)
-    ):
-
-        d1 = future_dates[i - 1]
-
-        d2 = future_dates[i]
-
-        diff = model.NewIntVar(
-
-            0,
-
-            MAX_SYSTEMS_PER_DAY,
-
-            f"diff_{i}"
-
-        )
-
-        model.AddAbsEquality(
-
-            diff,
-
-            daily_load[d2]
-            - daily_load[d1]
-
-        )
-
+    for i in range(1, len(future_dates)):
+        d1, d2 = future_dates[i-1], future_dates[i]
+        diff = model.NewIntVar(0, MAX_SYSTEMS_PER_DAY, f"diff_{i}")
+        model.AddAbsEquality(diff, daily_load[d2] - daily_load[d1])
         diffs.append(diff)
 
-
-    # ========================================
-    # PRIORITY SCORE
-    # ========================================
-
-    priority_score = sum(
-
-        x[p, d] * priorities[p]
-
-        for p in products
-
-        for d in future_dates
-    )
-
-    # ========================================
-    # OBJECTIVE
-    # ========================================
-
-    total_production = sum(
-
-        x[p, d]
-
-        for p in products
-
-        for d in future_dates
-
-    )
-
-    diversity_score = sum(
-
-        y[p, d]
-
-        for p in products
-
-        for d in future_dates
-
-    )
-
+    # Objective
     model.Maximize(
-
-          priority_score * 10
-
-        + total_production
-
-        + DIVERSITY_WEIGHT
-        * diversity_score
-
-        - SMOOTHNESS_WEIGHT
-        * sum(diffs)
-
-        - STABILITY_WEIGHT
-        * sum(schedule_changes)
-
+        sum(x[p, d] * priorities[p] for p in products for d in future_dates) * 10 +
+        sum(x[p, d] for p in products for d in future_dates) +
+        DIVERSITY_WEIGHT * sum(y[p, d] for p in products for d in future_dates) -
+        SMOOTHNESS_WEIGHT * sum(diffs) -
+        STABILITY_WEIGHT * sum(schedule_changes)
     )
-
-    # ========================================
-    # SOLVE
-    # ========================================
 
     solver = cp_model.CpSolver()
-
     solver.parameters.random_seed = 4
-
     solver.parameters.max_time_in_seconds = 60
-
     solver.parameters.num_search_workers = 4
 
     status = solver.Solve(model)
 
-    # ========================================
-    # NO SOLUTION
-    # ========================================
-
-    if status not in [
-
-        cp_model.OPTIMAL,
-
-        cp_model.FEASIBLE
-
-    ]:
-
+    if status not in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
         return None, None, None
 
     # ========================================
-    # FINAL PLAN
+    # BUILD OUTPUT
     # ========================================
-    
     final_schedule = []
 
-    # PAST ACTUALS
-
+    # Past Dates → Use Actuals (MUST be fixed)
     for d in past_dates:
-
-        row = {
-            "Date": d
-        }
-
+        row = {"Date": d}
         total = 0
-
         if d in actual_dict:
-
             for p in products:
-
                 qty = actual_dict[d][p]
-
                 row[p] = qty
-
                 total += qty
-
+        else:
+            for p in products:
+                row[p] = 0
         row["Total"] = total
-
         final_schedule.append(row)
 
-    # FUTURE PLAN
-
+    # Future Dates → Optimized Plan
     for d in future_dates:
-
-        row = {
-            "Date": d
-        }
-
+        row = {"Date": d}
         total = 0
-
         for p in products:
-
-            qty = solver.Value(
-                x[p, d]
-            )
-
+            qty = solver.Value(x[p, d])
             row[p] = qty
-
             total += qty
-
         row["Total"] = total
-
         final_schedule.append(row)
 
-    schedule_df = pd.DataFrame(
-        final_schedule
-    )
+    schedule_df = pd.DataFrame(final_schedule)
 
-    
+    # Ensure correct order
+    schedule_df['Date_dt'] = pd.to_datetime(schedule_df['Date'], format="%d-%m-%y")
+    schedule_df = schedule_df.sort_values('Date_dt').drop(columns=['Date_dt']).reset_index(drop=True)
 
-
-
-    # ========================================
-    # MATERIAL STATUS
-    # ========================================
-
-    material_status = []
-
-    for material in materials:
-
-        total_used = 0
-
-        for p in products:
-
-            usage = material_usage[
-                material
-            ][p]
-
-            produced_qty = schedule_df[
-                p
-            ].sum()
-
-            total_used += (
-                produced_qty * usage
-            )
-
-        final_available = (
-            material_available[
-                material
-            ][future_dates[-1]]
-        )
-
-        remaining = (
-            final_available
-            - total_used
-        )
-
-        material_status.append({
-
-            "Material": material,
-
-            "Available": final_available,
-
-            "Used": total_used,
-
-            "Remaining": remaining
-
-        })
-
-    material_df_output = pd.DataFrame(
-        material_status
-    )
-
-    # ========================================
-    # TARGET STATUS
-    # ========================================
-
-    target_status = []
-
-    for p in products:
-
-        planned = schedule_df[p].sum()
-
-        remaining = (
-            targets[p]
-            - planned
-        )
-
-        target_status.append({
-
-            "Product": p,
-
-            "Target": targets[p],
-
-            "Planned": planned,
-
-            "Remaining": remaining
-
-        })
-
-    target_df = pd.DataFrame(
-        target_status
-    )
-
-    return schedule_df
-
-        
-def check_csv(df):
-    # read_csv will raise an EmptyDataError if the file is completely blank (0 bytes)
-        
-    if df.empty:
-        return True  # File has headers but no data rows
-    else:
-        return False  # File has data
-    
-        
+    return schedule_df  # if you are new developer you can expand material/target status it is base code used for scheduling from 28 to 27
