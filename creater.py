@@ -1,7 +1,7 @@
 import pandas as pd
 from ortools.sat.python import cp_model
 from datetime import datetime, timedelta
-
+from collections import defaultdict
 max_systems_per_day = 6
 diversity_weight = 1
 smoothness_weight = 1
@@ -45,20 +45,57 @@ def create_schedule(material_df, targets_df, start_date):
     material_stock = {row["Material"]: int(row["Available_Qty"]) for _, row in material_df.iterrows()}
     material_usage = {row["Material"]: {p: int(row[p]) for p in products} for _, row in material_df.iterrows()}
 
-    arrivals = {}
-    for _, row in material_df.iterrows():
-        if pd.isna(row["Incoming_Qty"]) or pd.isna(row["Date"]):
-            continue
-        day = str(row["Date"])
-        mat = row["Material"]
-        qty = int(row["Incoming_Qty"])
-        arrivals.setdefault(day, {})[mat] = arrivals.get(day, {}).get(mat, 0) + qty
+    # ========================================
+    # ARRIVALS - Robust handling of comma-separated values
+    # ========================================
+    
+    arrivals = defaultdict(lambda: defaultdict(int))
 
-    # Material Availability
+    for _, row in material_df.iterrows():
+        mat = str(row["Material"]).strip()
+        
+        incoming_qty_str = str(row.get("Incoming_Qty", "")).strip()
+        dates_str = str(row.get("Date", "")).strip()
+        
+        # Clean and remove unwanted characters
+        incoming_qty_str = incoming_qty_str.replace('"', '').replace("'", "")
+        dates_str = dates_str.replace('"', '').replace("'", "")
+        
+        if not incoming_qty_str or incoming_qty_str in ["0", "nan", "NaN"]:
+            continue
+        if not dates_str or dates_str in ["nan", "NaN"]:
+            continue
+        
+        # Split and clean
+        qty_list = []
+        for q in incoming_qty_str.split(","):
+            q_clean = q.strip()
+            if q_clean and q_clean.isdigit():
+                qty_list.append(q_clean)
+        
+        date_list = [d.strip() for d in dates_str.split(",") if d.strip()]
+        
+        # Pair them safely
+        for i in range(min(len(qty_list), len(date_list))):
+            try:
+                qty = int(qty_list[i])
+                day = date_list[i]
+                
+                if qty > 0 and day:
+                    arrivals[day][mat] += qty
+            except (ValueError, IndexError):
+                print(f"Warning: Could not parse qty '{qty_list[i]}' for material '{mat}' on date '{day}'")
+                continue
+
+    # ========================================
+    # MATERIAL AVAILABILITY (Cumulative)
+    # ========================================
     material_available = {}
+
     for mat in materials:
         material_available[mat] = {}
-        cum = material_stock[mat]
+        cum = material_stock.get(mat, 0)
+        
         for day in working_dates:
             if day in arrivals and mat in arrivals[day]:
                 cum += arrivals[day][mat]

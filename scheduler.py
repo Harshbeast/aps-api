@@ -6,7 +6,7 @@
 import pandas as pd
 from ortools.sat.python import cp_model
 from datetime import datetime, timedelta
-
+from collections import defaultdict
 # ============================================
 # CONFIGURATION
 # ============================================
@@ -101,15 +101,59 @@ def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_da
             date = str(row["Date"])
             previous_plan[date] = {p: int(row[p]) for p in products}
 
-    # Arrivals
-    arrivals = {}
+    # # Arrivals
+    # arrivals = {}
+    # for _, row in material_df.iterrows():
+    #     if pd.isna(row.get("Incoming_Qty")) or pd.isna(row.get("Date")):
+    #         continue
+    #     day = str(row["Date"])
+    #     mat = row["Material"]
+    #     qty = int(row["Incoming_Qty"])
+    #     arrivals.setdefault(day, {})[mat] = arrivals.get(day, {}).get(mat, 0) + qty
+
+    # ========================================
+    # ARRIVALS - Robust handling of comma-separated values
+    # ========================================
+    
+    arrivals = defaultdict(lambda: defaultdict(int))
+
     for _, row in material_df.iterrows():
-        if pd.isna(row.get("Incoming_Qty")) or pd.isna(row.get("Date")):
+        mat = str(row["Material"]).strip()
+        
+        incoming_qty_str = str(row.get("Incoming_Qty", "")).strip()
+        dates_str = str(row.get("Date", "")).strip()
+        
+        # Clean and remove unwanted characters
+        incoming_qty_str = incoming_qty_str.replace('"', '').replace("'", "")
+        dates_str = dates_str.replace('"', '').replace("'", "")
+        
+        if not incoming_qty_str or incoming_qty_str in ["0", "nan", "NaN"]:
             continue
-        day = str(row["Date"])
-        mat = row["Material"]
-        qty = int(row["Incoming_Qty"])
-        arrivals.setdefault(day, {})[mat] = arrivals.get(day, {}).get(mat, 0) + qty
+        if not dates_str or dates_str in ["nan", "NaN"]:
+            continue
+        
+        # Split and clean
+        qty_list = []
+        for q in incoming_qty_str.split(","):
+            q_clean = q.strip()
+            if q_clean and q_clean.isdigit():
+                qty_list.append(q_clean)
+        
+        date_list = [d.strip() for d in dates_str.split(",") if d.strip()]
+        
+        # Pair them safely
+        for i in range(min(len(qty_list), len(date_list))):
+            try:
+                qty = int(qty_list[i])
+                day = date_list[i]
+                
+                if qty > 0 and day:
+                    arrivals[day][mat] += qty
+            except (ValueError, IndexError):
+                print(f"Warning: Could not parse qty '{qty_list[i]}' for material '{mat}' on date '{day}'")
+                continue
+
+
 
     # Apply Actual Consumption (Past)
     for d in past_dates:
