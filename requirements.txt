@@ -3,4 +3,3 @@ uvicorn
 pandas
 numpy
 ortools
-collections
