@@ -30,7 +30,7 @@ async def run_aps(data: dict):
             # Default to current month
             start_date = datetime.today().replace(day=1).strftime("%d-%m-%y")
 
-            
+
         # ====================================
         # RECEIVE DATA
         # ====================================
@@ -149,7 +149,7 @@ async def run_aps(data: dict):
         # ====================================
         # DATES
         # ====================================
-        start_date = datetime.today().replace(day=1).strftime("%d-%m-%y")
+        # start_date = datetime.today().replace(day=1).strftime("%d-%m-%y")
         today_str = datetime.today().strftime("%d-%m-%y")
         tomorrow_str = (datetime.today() + timedelta(days=1)).strftime("%d-%m-%y")
 
