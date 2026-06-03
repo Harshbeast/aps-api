@@ -11,6 +11,26 @@ app = FastAPI()
 @app.post("/run_aps")
 async def run_aps(data: dict):
     try:
+
+        # ===================== NEW: Get Start Date =====================
+        start_date_input = data.get("start_date")
+        
+        if start_date_input:
+            try:
+                # Case 1: Full date like "15-06-26"
+                start_date = datetime.strptime(start_date_input, "%d-%m-%y").strftime("%d-%m-%y")
+            except:
+                try:
+                    # Case 2: Month-Year like "06-2026"
+                    dt = datetime.strptime(start_date_input, "%m-%Y")
+                    start_date = dt.replace(day=1).strftime("%d-%m-%y")
+                except:
+                    return {"status": "error", "message": "Invalid start_date. Use DD-MM-YY or MM-YYYY"}
+        else:
+            # Default to current month
+            start_date = datetime.today().replace(day=1).strftime("%d-%m-%y")
+
+            
         # ====================================
         # RECEIVE DATA
         # ====================================
