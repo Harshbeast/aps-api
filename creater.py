@@ -49,43 +49,48 @@ def create_schedule(material_df, targets_df, start_date):
     # ARRIVALS - Robust handling of comma-separated values
     # ========================================
     
+        # ========================================
+    # ARRIVALS - Robust Date Parsing (Fixed)
+    # ========================================
     arrivals = defaultdict(lambda: defaultdict(int))
 
     for _, row in material_df.iterrows():
         mat = str(row["Material"]).strip()
-        
-        incoming_qty_str = str(row.get("Incoming_Qty", "")).strip()
-        dates_str = str(row.get("Date", "")).strip()
-        
-        # Clean and remove unwanted characters
-        incoming_qty_str = incoming_qty_str.replace('"', '').replace("'", "")
-        dates_str = dates_str.replace('"', '').replace("'", "")
-        
-        if not incoming_qty_str or incoming_qty_str in ["0", "nan", "NaN"]:
+        if not mat:
             continue
-        if not dates_str or dates_str in ["nan", "NaN"]:
+            
+        qty_str = str(row.get("Incoming_Qty", "")).strip()
+        date_str = str(row.get("Date", "")).strip()
+        
+        if qty_str in ["", "0", "nan", "NaN", "0.0"] or date_str in ["", "nan", "NaN"]:
             continue
         
-        # Split and clean
-        qty_list = []
-        for q in incoming_qty_str.split(","):
-            q_clean = q.strip()
-            if q_clean and q_clean.isdigit():
-                qty_list.append(q_clean)
+        date_list = [d.strip() for d in date_str.split(",") if d.strip()]
+        qty_list = [q.strip() for q in qty_str.split(",") if q.strip()]
         
-        date_list = [d.strip() for d in dates_str.split(",") if d.strip()]
-        
-        # Pair them safely
-        for i in range(min(len(qty_list), len(date_list))):
+        for d_text, q_text in zip(date_list, qty_list):
             try:
-                qty = int(qty_list[i])
-                day = date_list[i]
-                
-                if qty > 0 and day:
-                    arrivals[day][mat] += qty
-            except (ValueError, IndexError):
-                print(f"Warning: Could not parse qty '{qty_list[i]}' for material '{mat}' on date '{day}'")
-                continue
+                qty = int(float(q_text))   # handles cases like 5.0
+                if qty <= 0:
+                    continue
+                    
+                # Try multiple common date formats
+                parsed = False
+                for fmt in ["%d-%m-%y", "%d-%m-%Y", "%d/%m/%y", "%d/%m/%Y", "%d.%m.%y", "%d.%m.%Y"]:
+                    try:
+                        dt = datetime.strptime(d_text, fmt)
+                        standardized_day = dt.strftime("%d-%m-%y")   # Must match working_dates format
+                        arrivals[standardized_day][mat] += qty
+                        parsed = True
+                        break
+                    except ValueError:
+                        continue
+                        
+                if not parsed:
+                    print(f"Warning: Could not parse date '{d_text}' for material '{mat}'")
+                    
+            except Exception as e:
+                print(f"Warning: Error parsing arrival for {mat} on '{d_text}': {e}")
 
     # ========================================
     # MATERIAL AVAILABILITY (Cumulative)
