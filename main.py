@@ -127,6 +127,12 @@ async def run_aps(data: dict):
             "Date": "Title","zen10": "field_1","zen30": "field_2","zen50": "field_3","zen70": "field_4","zen90": "field_5"
         }
 
+        # reverse_target_status_columns = {
+        #     "Title": "Product",
+        #     "field_1": "Target_Qty",
+        #     "field_2": "Priority"
+        # }
+
         # ====================================
         # CLEAN DATA FUNCTION
         # ====================================
@@ -164,6 +170,8 @@ async def run_aps(data: dict):
                 start_date=start_date
             )
 
+            material_status_df = output_df[1]
+            final_achieved_targets_df = output_df[2]
             output_df=output_df[0]
 
             schedule_output = output_df.rename(columns=reverse_schedule_columns)
@@ -171,12 +179,16 @@ async def run_aps(data: dict):
 
             schedule_output = clean_dataframe(schedule_output)
             backup_output = clean_dataframe(backup_output)
+            material_status_output = clean_dataframe(material_status_df)
+
 
             return {
                 "status": "success",
                 "type": "no_changes",
                 "schedule": schedule_output.to_dict(orient="records"),
-                "backup": backup_output.to_dict(orient="records")
+                "backup": backup_output.to_dict(orient="records"),
+                "material_status": material_status_output.to_dict(orient="records"),
+                "target_status": final_achieved_targets_df.to_dict(orient="records")
             }
 
         # ====================================
