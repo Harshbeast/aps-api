@@ -164,6 +164,8 @@ async def run_aps(data: dict):
                 start_date=start_date
             )
 
+            output_df=output_df[0]
+
             schedule_output = output_df.rename(columns=reverse_schedule_columns)
             backup_output = material_df.rename(columns=reverse_material_columns)
 
@@ -222,6 +224,8 @@ async def run_aps(data: dict):
                 start_date=start_date,
                 replan_date=tomorrow_str
             )
+
+            replanned_df = replanned_df[0]
 
             schedule_output = replanned_df.rename(columns=reverse_schedule_columns)
             backup_output = material_df.rename(columns=reverse_material_columns)

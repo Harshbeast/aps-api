@@ -1,21 +1,24 @@
-
 # ============================================
 # scheduler.py
 # ============================================
 
+from collections import defaultdict
 import pandas as pd
 from ortools.sat.python import cp_model
 from datetime import datetime, timedelta
-from collections import defaultdict
+
 # ============================================
 # CONFIGURATION
 # ============================================
 
-MAX_SYSTEMS_PER_DAY = 6
-MAX_PRODUCTS_PER_DAY = 6
+MAX_SYSTEMS_PER_DAY = 5
+MAX_PRODUCTS_PER_DAY = 5
 DIVERSITY_WEIGHT = 2
+preferred_daily = 5
 SMOOTHNESS_WEIGHT = 1
 STABILITY_WEIGHT = 1
+# target_daily_weight = 8
+earliness_weight = 12
 
 product_max = {
     "zen10": 2, "zen30": 1, "zen50": 2, "zen70": 2, "zen90": 1
@@ -101,16 +104,6 @@ def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_da
             date = str(row["Date"])
             previous_plan[date] = {p: int(row[p]) for p in products}
 
-    # # Arrivals
-    # arrivals = {}
-    # for _, row in material_df.iterrows():
-    #     if pd.isna(row.get("Incoming_Qty")) or pd.isna(row.get("Date")):
-    #         continue
-    #     day = str(row["Date"])
-    #     mat = row["Material"]
-    #     qty = int(row["Incoming_Qty"])
-    #     arrivals.setdefault(day, {})[mat] = arrivals.get(day, {}).get(mat, 0) + qty
-
     # ========================================
     # ARRIVALS - Robust handling of comma-separated values
     # ========================================
@@ -158,7 +151,16 @@ def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_da
             except Exception as e:
                 print(f"Warning: Error parsing arrival for {mat} on '{d_text}': {e}")
 
-
+    
+    # # Arrivals
+    # arrivals = {}
+    # for _, row in material_df.iterrows():
+    #     if pd.isna(row.get("Incoming_Qty")) or pd.isna(row.get("Date")):
+    #         continue
+    #     day = str(row["Date"])
+    #     mat = row["Material"]
+    #     qty = int(row["Incoming_Qty"])
+    #     arrivals.setdefault(day, {})[mat] = arrivals.get(day, {}).get(mat, 0) + qty
 
     # Apply Actual Consumption (Past)
     for d in past_dates:
@@ -247,6 +249,12 @@ def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_da
     for d in future_dates:
         model.Add(daily_load[d] == sum(x[p, d] for p in products))
 
+    # is_good_day = {d: model.NewBoolVar(f"good_{d}") for d in future_dates}
+    # for d in future_dates:
+    #     # is_good_day = 1 if daily_load[d] >= preferred_daily
+    #     model.Add(daily_load[d] >= preferred_daily).OnlyEnforceIf(is_good_day[d])
+    #     model.Add(daily_load[d] < preferred_daily).OnlyEnforceIf(is_good_day[d].Not())
+
     diffs = []
     for i in range(1, len(future_dates)):
         d1, d2 = future_dates[i-1], future_dates[i]
@@ -254,13 +262,29 @@ def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_da
         model.AddAbsEquality(diff, daily_load[d2] - daily_load[d1])
         diffs.append(diff)
 
+    # good_days = sum(is_good_day[d] for d in future_dates)
+
+    # Create decreasing weight for each day (earlier days = higher weight)
+    day_weights = {}
+    n_days = len(future_dates)
+    for i, d in enumerate(future_dates):
+        # Linear decreasing weight: first day gets highest, last day gets lowest
+        weight = n_days - i                    # e.g., 25, 24, ..., 1
+        day_weights[d] = weight
+
+    earliness_bonus = sum(
+        x[p, d] * day_weights[d] for p in products for d in future_dates
+    )
+
     # Objective
     model.Maximize(
+        # target_daily_weight * good_days +
         sum(x[p, d] * priorities[p] for p in products for d in future_dates) * 10 +
         sum(x[p, d] for p in products for d in future_dates) +
         DIVERSITY_WEIGHT * sum(y[p, d] for p in products for d in future_dates) -
         SMOOTHNESS_WEIGHT * sum(diffs) -
-        STABILITY_WEIGHT * sum(schedule_changes)
+        STABILITY_WEIGHT * sum(schedule_changes)+
+        earliness_weight * earliness_bonus
     )
 
     solver = cp_model.CpSolver()
@@ -304,10 +328,45 @@ def run_scheduler(material_df, targets_df, actual_df, previous_plan_df, start_da
         row["Total"] = total
         final_schedule.append(row)
 
-    schedule_df = pd.DataFrame(final_schedule)
+    df = pd.DataFrame(final_schedule)
 
     # Ensure correct order
-    schedule_df['Date_dt'] = pd.to_datetime(schedule_df['Date'], format="%d-%m-%y")
-    schedule_df = schedule_df.sort_values('Date_dt').drop(columns=['Date_dt']).reset_index(drop=True)
+    df['Date_dt'] = pd.to_datetime(df['Date'], format="%d-%m-%y")
+    df = df.sort_values('Date_dt').drop(columns=['Date_dt']).reset_index(drop=True)
 
-    return schedule_df  # if you are new developer you can expand material/target status it is base code used for scheduling from 28 to 27
+    # return df,   # You can expand material/target status later
+
+    # ========================================
+    # MATERIAL STATUS
+    # ========================================
+    material_status = []
+    for material in materials:
+        total_used = sum(df[p].sum() * material_usage[material][p] for p in products)
+        final_available = material_available[material][future_dates[-1]] if future_dates else 0
+        remaining = final_available - total_used
+
+        material_status.append({
+            "Material": material,
+            "Available": final_available,
+            "Used": total_used,
+            "Remaining": remaining
+        })
+
+    material_df_output = pd.DataFrame(material_status)
+
+    # ========================================
+    # TARGET STATUS
+    # ========================================
+    target_status = []
+    for p in products:
+        planned = df[p].sum()
+        target_status.append({
+            "Product": p,
+            "Target": targets[p],
+            "Planned": planned,
+            "Remaining": targets[p] - planned
+        })
+
+    target_df = pd.DataFrame(target_status)
+
+    return df, material_df_output, target_df   # Note: returning 3 values now
