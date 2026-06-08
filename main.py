@@ -48,6 +48,17 @@ async def run_aps(data: dict):
             "field_8": "Incoming_Qty",
             "field_9": "Date"
         })
+        # NEW: Handle Included column safely
+        if 'Included' in material_df.columns:
+            # Convert Yes/No to boolean
+            material_df['Included'] = material_df['Included'].map({
+                True: True, 'Yes': True, 1: True,
+                False: False, 'No': False, 0: False
+            }).fillna(True)   # default to True if missing
+            
+            # Filter only included materials
+            material_df = material_df[material_df['Included'] == True].copy()
+            material_df = material_df.drop(columns=['Included'], errors='ignore')
 
         targets_df = pd.DataFrame(data.get("targets", []))
         targets_df = targets_df.rename(columns={
