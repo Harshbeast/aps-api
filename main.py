@@ -247,20 +247,25 @@ async def run_aps(data: dict):
                 start_date=start_date,
                 replan_date=tomorrow_str
             )
-
+            material_status_df = replanned_df[1]
+            final_achieved_targets_df = replanned_df[2]
             replanned_df = replanned_df[0]
 
             schedule_output = replanned_df.rename(columns=reverse_schedule_columns)
             backup_output = material_df.rename(columns=reverse_material_columns)
 
+
             schedule_output = clean_dataframe(schedule_output)
             backup_output = clean_dataframe(backup_output)
+            material_status_output = clean_dataframe(material_status_df)
 
             return {
                 "status": "success",
                 "type": "replanned",
                 "schedule": schedule_output.to_dict(orient="records"),
-                "backup": backup_output.to_dict(orient="records")
+                "backup": backup_output.to_dict(orient="records"),
+                "material_status": material_status_output.to_dict(orient="records"),
+                "target_status": final_achieved_targets_df.to_dict(orient="records")
             }
 
         # No changes
